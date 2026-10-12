@@ -1,0 +1,41 @@
+{
+  "network": "GenLayer StudioNet",
+  "chain_id": 61999,
+  "contract_name": "Credit Sentinel",
+  "contract_class": "CreditSentinel",
+  "repository": "https://github.com/zoefunds/Credit-Sentinel",
+  "deployer_account": "cw-lender-e2e",
+  "deployer_address": "0x1c2e587043568239B2fcaeC5f96F278EB134b7f5",
+  "contract_address": "0xB15FfAa6A42901Db55d985f24F99806C9e563a43",
+  "deployment_transaction": "0xacc98388694842a1cf4c0f2e917f0b9c63d037bbf93ca6ac8d73ff54249c9134",
+  "deployment_status": "FINALIZED",
+  "consensus": "MAJORITY_AGREE",
+  "contract_source_sha256": "ee80f682f2620f1840068f57761d7f2347bd383e6aa4d08baea152ca698fcae0",
+  "deployed_at": "2026-10-12",
+  "live_e2e": {
+    "evidence_urls": [
+      "https://en.wikipedia.org/wiki/Bitcoin",
+      "https://river.com/learn/terms/1/21-million/",
+      "https://www.fidelitydigitalassets.com/research-and-insights/understanding-bitcoin-and-ethereum-supply"
+    ],
+    "observed_max_bitcoin_supply": "21000000.000000",
+    "publisher_quorum": "3/3",
+    "scenarios": [
+      {
+        "loan_id": 1,
+        "outcome": "COMPLIANT_REPAID_SETTLED",
+        "check_transaction": "0x0df3b13684c795e89328c6e2c7ded32c171976d94e5ea8296dfcc6e7e1163858"
+      },
+      {
+        "loan_id": 2,
+        "outcome": "BREACH_CHALLENGE_WINDOW_OPENED",
+        "check_transaction": "0x4fb00205dd9fe885bb1170bdb8bf19e4ce8bc3478001f28856bf7a4aeb2002dd"
+      },
+      {
+        "loan_id": 3,
+        "outcome": "CANCELLED_REFUNDED",
+        "refund_transaction": "0x94fdc6d9b4d6a9f46f9ac35d0c5ced56b7223f7e7d3c55847d6a0cbc5f8b6659"
+      }
+    ]
+  }
+}
