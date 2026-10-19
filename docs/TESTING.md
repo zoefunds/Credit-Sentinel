@@ -37,7 +37,7 @@ Verified results on the deployed source:
 - GenVM lint: `3 passed`, no warnings.
 - SHA-256 matched the deployment record.
 
-Direct tests deliberately mock web and model calls. They cover validation, authorization, escrow accounting, principal readiness, repayment, cancellation, cooldowns, challenges, three breach tiers, maturity settlement, double-claim prevention, and safe `INCONCLUSIVE` handling.
+Direct tests deliberately mock web and model calls. They cover validation, authorization, escrow accounting, principal readiness, repayment, cancellation, cooldowns, challenges, three breach tiers, maturity settlement, double-claim prevention, and safe `INCONCLUSIVE` handling. Challenge-specific coverage proves that an unusable challenge URL reverts before storage and leaves the breach, evidence count, and both parties' challenge lanes unchanged.
 
 ## Live runner setup
 
@@ -76,7 +76,7 @@ https://www.fidelitydigitalassets.com/research-and-insights/understanding-bitcoi
 Expected outcomes:
 
 1. `max_bitcoin_supply == 21000000` becomes finalized `COMPLIANT`, allows the principal draw, and completes repayment plus both settlement claims.
-2. `max_bitcoin_supply >= 22000000` observes `21000000.000000`, becomes an unfinalized `BREACH`, and opens the mandatory six-hour challenge window.
+2. `max_bitcoin_supply >= 22000000` observes `21000000.000000`, becomes an unfinalized `BREACH`, and opens the mandatory six-hour challenge window. Any proposed challenge URL must independently return `COMPLIANT` before it is admitted; three admitted URLs from one party must then corroborate compliance while the original publisher set is re-read.
 3. An undrawn facility is cancelled before collateral and returns the full principal through `claim_settlement`.
 
 Every write waits for StudioNet finality. The model-backed checks perform real independent validator fetches; they can take several minutes.

@@ -14,6 +14,8 @@
 
 The deployed class is `CreditSentinel`. The old product name does not appear in the deployed source.
 
+> Historical deployment note: this report records the first StudioNet deployment. The challenge-flow remediation is submitted and deployed as a new contract instance; its address and fresh source hash are recorded in the current deployment record and README after the remediation deployment finalizes. The historical instance must not be used for challenge adjudication.
+
 ## Real evidence set
 
 The nondeterministic checks used three independent, public sources describing Bitcoin's fixed maximum supply:

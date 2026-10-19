@@ -631,6 +631,40 @@ def test_challenge_evidence_can_overturn_breach(direct_vm, direct_deploy, direct
     ]
 
 
+def test_unusable_challenge_submission_does_not_consume_either_party_lane(
+    direct_vm, direct_deploy, direct_alice, direct_bob,
+):
+    contract, loan_id, covenant_id = _setup_offchain_active_loan(
+        direct_vm, direct_deploy, direct_alice, direct_bob,
+    )
+    mock_offchain_verdict(direct_vm, status="BREACH", value=0.8)
+    direct_vm.sender = direct_alice
+    check_id = contract.trigger_covenant_check(loan_id, covenant_id)
+
+    # An ambiguous/unusable page is rejected before it reaches storage.
+    mock_offchain_verdict(direct_vm, status="INCONCLUSIVE", value=0)
+    direct_vm.sender = direct_bob
+    with direct_vm.expect_revert():
+        contract.submit_challenge_evidence(
+            loan_id, check_id, "https://four.example.org/ambiguous", "No clear current ratio.",
+        )
+    check = contract.get_check(check_id)
+    assert check["status"] == "BREACH"
+    assert check["finalized"] is False
+    assert check["challenge_count"] == 0
+    assert check["challenge_evidence_urls"] == []
+
+    # A later usable contrary source is still admitted into Bob's untouched
+    # lane, proving the rejected URL consumed no meaningful opportunity.
+    mock_offchain_verdict(direct_vm, status="COMPLIANT", value=1.2)
+    contract.submit_challenge_evidence(
+        loan_id, check_id, "https://four.example.org/corroborated", "Current ratio is 1.2.",
+    )
+    check = contract.get_check(check_id)
+    assert check["challenge_count"] == 1
+    assert [item.lower() for item in check["challenge_evidence_submitters"]] == [to_hex(direct_bob).lower()]
+
+
 def test_challenge_window_closes_and_finalizes_breach(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract, loan_id, covenant_id = _setup_offchain_active_loan(direct_vm, direct_deploy, direct_alice, direct_bob)
     mock_offchain_verdict(direct_vm, status="BREACH", value=0.8)

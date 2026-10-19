@@ -47,10 +47,13 @@ TRUST BOUNDARY (spec section 7) — enforced in code, not merely documented:
     touches a ledger field. Fund movement lives exclusively in
     _apply_consequence() / _send_gen(), which are ordinary deterministic
     methods never invoked from inside gl.vm.run_nondet_unsafe.
-  * submit_challenge_evidence() only APPENDS an evidence entry to
-    CheckRecord.challenge_evidence_urls / challenge_evidence_notes — it never
-    rewrites covenant.source_ref. Re-evaluation re-reads the same pinned
-    source_ref plus the appended evidence.
+  * Challenge evidence is admitted one URL at a time only after independent
+    validator inspection confirms that it is a usable contrary (COMPLIANT)
+    observation. Each party has its own three-source challenge lane, so
+    unusable or non-corroborating submissions never consume the other
+    party's opportunity. A lane can overturn only after its three admitted
+    sources corroborate compliance while the original pinned source set is
+    independently re-read.
   * finalize_covenant_check() refuses to apply an irreversible consequence
     until now >= challenge window end AND no pending challenge remains.
 """
@@ -187,7 +190,8 @@ MAX_CONDITION_FIELD_LEN: int = 200
 MAX_EVIDENCE_URL_LEN: int = 500
 MAX_EVIDENCE_NOTE_LEN: int = 1000
 MAX_FETCH_EXCERPT: int = 4000
-MAX_CHALLENGES_PER_CHECK: int = 3
+MAX_CHALLENGE_EVIDENCE_PER_PARTY: int = 3
+MAX_CHALLENGE_EVIDENCE_PER_CHECK: int = 2 * MAX_CHALLENGE_EVIDENCE_PER_PARTY
 MAX_ABS_THRESHOLD: float = 1_000_000_000_000.0
 MAX_COVENANTS_JSON_LEN: int = 20_000
 
@@ -256,6 +260,7 @@ class CheckRecord:
     challenge_pending: bool
     challenge_evidence_urls: DynArray[str]
     challenge_evidence_notes: DynArray[str]
+    challenge_evidence_submitters: DynArray[Address]
     finalized: bool             # true once the consequence (or no-op) has been applied
 
 
@@ -891,34 +896,61 @@ Respond with ONLY a JSON object, no markdown, with exactly these keys:
 
     def _evaluate_offchain(self, covenant: Covenant, extra_evidence: list,
                            pinned_source_text: str = "") -> dict:
-        # This function is invoked separately by the nondeterministic leader
-        # and every validator. Its inputs come only from contract storage;
-        # there is no backend response/body/verdict parameter anywhere in the
-        # call chain. On the initial round each participant renders every
-        # pinned URL. Challenge rounds bind to the frozen primary hash and
-        # independently render every new evidence URL.
+        """Evaluate the immutable source set, and optionally a complete
+        three-source contrary-evidence lane.
+
+        Challenge adjudication never substitutes party-supplied URLs for the
+        covenant's original publishers. Every leader and validator first
+        re-fetches the original set. A fresh COMPLIANT original set may of
+        course correct its own earlier BREACH. Otherwise an override needs a
+        complete, independently corroborated COMPLIANT challenge lane. Any
+        fetch/model/quorum failure preserves the pending BREACH; it cannot
+        become an INCONCLUSIVE no-op merely because a challenger supplied
+        unusable pages.
+        """
         source_urls = _parse_offchain_sources(covenant.source_ref)
-        # A challenge cannot replace a corroborated source set with one party's
-        # assertion. It becomes authoritative only after at least three
-        # additive URLs from distinct publisher hosts form their own majority.
-        if len(extra_evidence) >= MIN_OFFCHAIN_SOURCES:
-            evidence_urls = [str(item.get("url", "")) for item in extra_evidence]
-            hosts = [_url_hostname(url) for url in evidence_urls]
-            if len(set(hosts)) == len(hosts):
-                challenged = self._evaluate_source_set(covenant, evidence_urls)
-                challenged["source_hash"] = _hash_text(
-                    _hash_text(pinned_source_text) + ":" + challenged["source_hash"]
-                )
-                return challenged
-        if pinned_source_text:
+        original = self._evaluate_source_set(covenant, source_urls)
+        if not extra_evidence:
+            return original
+
+        original_hash = original["source_hash"]
+        if int(original["status"]) == COVENANT_COMPLIANT:
+            # The creation-time-pinned publishers themselves now corroborate
+            # compliance. No party-controlled source replacement is involved.
+            return original
+
+        evidence_urls = [str(item.get("url", "")) for item in extra_evidence]
+        hosts = [_url_hostname(url) for url in evidence_urls]
+        if (
+            int(original["status"]) != COVENANT_BREACH
+            or len(evidence_urls) != MIN_OFFCHAIN_SOURCES
+            or len(set(evidence_urls)) != len(evidence_urls)
+            or len(set(hosts)) != len(hosts)
+        ):
             return {
-                "status": COVENANT_INCONCLUSIVE,
-                "observed_value_scaled": 0,
-                "observed_note": "challenge evidence quorum not reached",
-                "source_hash": _hash_text(pinned_source_text),
-                "source_excerpt": "",
+                "status": COVENANT_BREACH,
+                "observed_value_scaled": int(original.get("observed_value_scaled", 0)),
+                "observed_note": "original breach remains pending; challenge lane is not adjudicable",
+                "source_hash": _hash_text(_hash_text(pinned_source_text) + ":" + original_hash),
+                "source_excerpt": str(original.get("source_excerpt", ""))[:MAX_FETCH_EXCERPT],
             }
-        return self._evaluate_source_set(covenant, source_urls)
+
+        challenged = self._evaluate_source_set(covenant, evidence_urls)
+        combined_hash = _hash_text(_hash_text(pinned_source_text) + ":" + original_hash + ":" + challenged["source_hash"])
+        if int(challenged["status"]) == COVENANT_COMPLIANT:
+            # The contrary lane has a 2/3-or-3/3 quorum and independently
+            # establishes a result opposite to the still-breaching original.
+            challenged["source_hash"] = combined_hash
+            challenged["observed_note"] = "original breach overturned by " + str(challenged["observed_note"])
+            return challenged
+
+        return {
+            "status": COVENANT_BREACH,
+            "observed_value_scaled": int(original.get("observed_value_scaled", 0)),
+            "observed_note": "original breach remains pending; contrary evidence did not corroborate compliance",
+            "source_hash": combined_hash,
+            "source_excerpt": str(original.get("source_excerpt", ""))[:MAX_FETCH_EXCERPT],
+        }
 
     def _evaluate_covenant_leader(self, covenant: Covenant, extra_evidence: list,
                                   pinned_source_text: str = "") -> dict:
@@ -990,6 +1022,29 @@ Respond with ONLY a JSON object, no markdown, with exactly these keys:
         result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         if not isinstance(result, dict):
             raise gl.vm.UserError(ERR_LLM + "consensus returned a malformed covenant result")
+        return result
+
+    def _run_challenge_submission_evaluation(self, covenant: Covenant, evidence_url: str) -> dict:
+        """Consensus-check one proposed challenge URL before storing it.
+
+        A stored URL has already independently produced COMPLIANT evidence on
+        its own. This admission gate makes failed fetches, ambiguous pages,
+        and pages that support the original breach non-consuming submissions.
+        Three admitted URLs from the same party are still required later for
+        a corroborated challenge-lane override.
+        """
+        def leader_fn() -> dict:
+            return self._evaluate_source_set(covenant, [evidence_url])
+
+        def validator_fn(leaders_res) -> bool:
+            if not isinstance(leaders_res, gl.vm.Return):
+                return _handle_leader_error(leaders_res, leader_fn)
+            validator_data = leader_fn()
+            return self._covenant_results_agree(leaders_res.calldata, validator_data)
+
+        result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
+        if not isinstance(result, dict):
+            raise gl.vm.UserError(ERR_LLM + "consensus returned a malformed challenge-submission result")
         return result
 
     # ========================================================================
@@ -1244,6 +1299,7 @@ Respond with ONLY a JSON object, no markdown, with exactly these keys:
             challenge_pending=False,
             challenge_evidence_urls=[],
             challenge_evidence_notes=[],
+            challenge_evidence_submitters=[],
             finalized=False,
         )
         self.loan_check_ids[u32(loan_id)].append(kid)
@@ -1281,22 +1337,26 @@ Respond with ONLY a JSON object, no markdown, with exactly these keys:
 
     @gl.public.write
     def submit_challenge_evidence(self, loan_id: int, check_id: int, evidence_url: str, evidence_note: str) -> None:
-        """Either party may, during an open challenge window on a BREACH
-        finding, submit ADDITIONAL evidence. This can only APPEND to the
-        check's evidence list — it never replaces covenant.source_ref, which
-        stays pinned to what was fixed at loan creation. Triggers an
-        immediate re-evaluation using the original pinned source PLUS all
-        accumulated challenge evidence."""
+        """Submit one candidate URL to the caller's challenge lane.
+
+        Submission is non-consuming until validators independently establish
+        a usable COMPLIANT observation from this exact URL. Admitted URLs are
+        attributed to their submitter; each lender and borrower has a
+        separate three-source lane. When a lane reaches three admitted URLs,
+        validators re-read the original covenant publishers *and* that lane.
+        Only a corroborated COMPLIANT lane can overturn the pending breach.
+        """
         loan = self._get_loan(loan_id)
         check = self._get_check(check_id)
         _require(int(check.loan_id) == loan_id, "check does not belong to this loan")
-        self._only_party(loan)
+        sender = self._only_party(loan)
         now_ts = self._now_ts()
 
         _require(int(check.status) == COVENANT_BREACH, "only a BREACH finding can be challenged")
         _require(not bool(check.finalized), "this check has already been finalized")
         _require(now_ts < int(check.challenge_window_ends_at), "challenge window has closed")
-        _require(int(check.challenge_count) < MAX_CHALLENGES_PER_CHECK, "challenge limit reached for this check")
+        _require(int(check.challenge_count) < MAX_CHALLENGE_EVIDENCE_PER_CHECK,
+                 "challenge evidence capacity reached for this check")
 
         covenant = self._get_covenant(int(check.covenant_id))
         _require(covenant.source_type == SOURCE_OFFCHAIN,
@@ -1314,34 +1374,53 @@ Respond with ONLY a JSON object, no markdown, with exactly these keys:
         _require(_url_hostname(url) not in existing_hosts,
                  "challenge evidence must use a distinct publisher hostname")
 
+        caller_admitted_count = sum(
+            1
+            for i in range(len(check.challenge_evidence_submitters))
+            if check.challenge_evidence_submitters[i] == sender
+        )
+        _require(caller_admitted_count < MAX_CHALLENGE_EVIDENCE_PER_PARTY,
+                 "your challenge-evidence lane already has three admitted sources")
+
+        # Validate before mutating storage. Arbitrary URLs, fetch failures,
+        # model ambiguity, and evidence supporting the existing breach all
+        # revert here and consume neither party's challenge lane.
+        admission = self._run_challenge_submission_evaluation(covenant, url)
+        _require(int(admission["status"]) == COVENANT_COMPLIANT,
+                 "challenge URL did not independently establish contrary compliant evidence")
+
         check.challenge_evidence_urls.append(url)
         check.challenge_evidence_notes.append(note)
+        check.challenge_evidence_submitters.append(sender)
         check.challenge_count = u32(int(check.challenge_count) + 1)
+        caller_admitted_count += 1
         # A single party-selected page can never overturn a corroborated
-        # finding. Accumulate three distinct publishers before reevaluation.
-        if int(check.challenge_count) < MIN_OFFCHAIN_SOURCES:
+        # finding. The caller must fill its own three-source lane; the other
+        # party keeps a full, independent lane even if this one fails.
+        if caller_admitted_count < MIN_OFFCHAIN_SOURCES:
             check.challenge_pending = False
             return
 
         check.challenge_pending = True
 
-        extra_evidence = [
+        lane_evidence = [
             {"url": check.challenge_evidence_urls[i], "note": check.challenge_evidence_notes[i]}
             for i in range(len(check.challenge_evidence_urls))
+            if check.challenge_evidence_submitters[i] == sender
         ]
-        result = self._run_covenant_evaluation(covenant, extra_evidence, check.pinned_source_hash)
-
-        check.status = u8(result["status"])
-        check.observed_value_scaled = i256(int(result["observed_value_scaled"]))
-        check.observed_note = str(result.get("observed_note", ""))[:200]
-        check.result_source_hash = str(result.get("source_hash", ""))
-        check.source_excerpt = str(result.get("source_excerpt", ""))[:MAX_FETCH_EXCERPT]
-        check.evaluated_at = u64(now_ts)
+        result = self._run_covenant_evaluation(covenant, lane_evidence, check.pinned_source_hash)
         check.challenge_pending = False
 
-        if int(result["status"]) != COVENANT_BREACH:
-            # Challenge overturned the breach finding — no consequence,
-            # finalize immediately as a no-op.
+        if int(result["status"]) == COVENANT_COMPLIANT:
+            # This is the sole party-evidence override path: the original
+            # source set was re-read and the caller's complete, corroborated
+            # contrary lane independently established compliance.
+            check.status = u8(COVENANT_COMPLIANT)
+            check.observed_value_scaled = i256(int(result["observed_value_scaled"]))
+            check.observed_note = str(result.get("observed_note", ""))[:200]
+            check.result_source_hash = str(result.get("source_hash", ""))
+            check.source_excerpt = str(result.get("source_excerpt", ""))[:MAX_FETCH_EXCERPT]
+            check.evaluated_at = u64(now_ts)
             check.finalized = True
 
     @gl.public.write
@@ -1575,6 +1654,10 @@ Respond with ONLY a JSON object, no markdown, with exactly these keys:
             "challenge_pending": bool(check.challenge_pending),
             "challenge_evidence_urls": list(check.challenge_evidence_urls),
             "challenge_evidence_notes": list(check.challenge_evidence_notes),
+            "challenge_evidence_submitters": [
+                check.challenge_evidence_submitters[i].as_hex
+                for i in range(len(check.challenge_evidence_submitters))
+            ],
             "finalized": bool(check.finalized),
         }
 
@@ -1622,6 +1705,10 @@ Respond with ONLY a JSON object, no markdown, with exactly these keys:
             "window_open": (not bool(check.finalized)) and now_ts < int(check.challenge_window_ends_at),
             "challenge_count": int(check.challenge_count),
             "challenge_pending": bool(check.challenge_pending),
+            "challenge_evidence_submitters": [
+                check.challenge_evidence_submitters[i].as_hex
+                for i in range(len(check.challenge_evidence_submitters))
+            ],
             "finalized": bool(check.finalized),
         }
 

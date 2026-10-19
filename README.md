@@ -27,7 +27,7 @@ See [the deployment record](proof/deployment.json) for machine-readable identity
 - Validators independently fetch and interpret every committed source. A strict publisher majority must corroborate a numeric value within a 2% tolerance.
 - Unreachable evidence, malformed model output, insufficient publisher agreement, or validator disagreement produces `INCONCLUSIVE`, never an invented compliance or breach result.
 - A borrower cannot draw principal until every covenant's latest check is finalized `COMPLIANT`.
-- Breaches open a challenge window before irreversible consequences. Challenges can append evidence but cannot replace the original sources.
+- Breaches open a challenge window before irreversible consequences. A candidate challenge URL is stored only after independent validator inspection establishes a usable `COMPLIANT` observation. Each party has a separate three-source lane; unusable, ambiguous, unreachable, or breach-supporting URLs revert without consuming either party's lane. A lane can overturn only when its three admitted sources corroborate compliance and the original precommitted publisher set is independently re-read.
 - Nondeterministic evaluation never moves funds. Transfers occur only in deterministic pull-settlement paths with ledger balances zeroed before transfer.
 
 ## Loan and breach lifecycle

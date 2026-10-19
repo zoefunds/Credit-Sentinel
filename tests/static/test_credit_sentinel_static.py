@@ -54,6 +54,24 @@ def test_consensus_and_transfer_boundaries_are_explicit():
     assert "MAX_OFFCHAIN_SOURCES: int = 5" in source
 
 
+def test_challenge_adjudication_cannot_replace_or_erase_original_breach():
+    source = SOURCE.read_text()
+    # Original publishers are always re-evaluated before a challenge lane.
+    assert "original = self._evaluate_source_set(covenant, source_urls)" in source
+    assert "if int(original[\"status\"]) == COVENANT_COMPLIANT:" in source
+    # A party URL must independently establish compliance before storage.
+    assert "_run_challenge_submission_evaluation(covenant, url)" in source
+    assert "challenge URL did not independently establish contrary compliant evidence" in source
+    # Failed corroboration explicitly preserves BREACH instead of finalizing
+    # an INCONCLUSIVE no-op.
+    assert '"status": COVENANT_BREACH' in source
+    assert "contrary evidence did not corroborate compliance" in source
+    # Each party owns a separate three-source lane.
+    assert "MAX_CHALLENGE_EVIDENCE_PER_PARTY: int = 3" in source
+    assert "challenge_evidence_submitters: DynArray[Address]" in source
+    assert "caller_admitted_count < MAX_CHALLENGE_EVIDENCE_PER_PARTY" in source
+
+
 def test_contract_uses_consensus_time_not_wall_clock():
     source = SOURCE.read_text()
     assert "datetime.datetime.now(datetime.timezone.utc)" in source
