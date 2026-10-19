@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "deploy:studionet": "node scripts/deploy_studionet.mjs",
-    "test:live": "node scripts/live_e2e.mjs"
+    "test:live": "node scripts/live_e2e.mjs",
+    "test:live:challenge-guard": "node scripts/live_challenge_guard.mjs"
   },
   "dependencies": {
     "genlayer-js": "1.1.8",
