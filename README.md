@@ -86,7 +86,7 @@ The active v2 instance separately passed a live challenge-admission guard: its o
 
 ```text
 contracts/credit_sentinel.py          deployment source
-tests/direct/                         39 direct-mode behavior tests
+tests/direct/                         41 direct-mode behavior tests
 tests/static/                         identity and safety checks
 scripts/deploy_studionet.mjs          keychain-backed StudioNet deployer
 scripts/live_e2e.mjs                  three-scenario finalized E2E runner
@@ -107,7 +107,7 @@ gltest tests/direct -q
 genvm-lint lint contracts/credit_sentinel.py --json
 ```
 
-Verified result: 44 tests passed and all three GenVM lint checks passed without warnings.
+Verified result: 46 tests passed and all three GenVM lint checks passed without warnings.
 
 For exact live commands, account requirements, retry behavior, and redeployment steps, see [docs/TESTING.md](docs/TESTING.md).
 

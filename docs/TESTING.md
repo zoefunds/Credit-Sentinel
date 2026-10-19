@@ -34,11 +34,11 @@ Verified results on the deployed source:
 
 - Python compilation succeeded.
 - Static identity and safety checks: `5 passed`.
-- Direct GenLayer behavior tests: `39 passed`.
+- Direct GenLayer behavior tests: `41 passed`.
 - GenVM lint: `3 passed`, no warnings.
 - SHA-256 matched the deployment record.
 
-Direct tests deliberately mock web and model calls. They cover validation, authorization, escrow accounting, principal readiness, repayment, cancellation, cooldowns, challenges, three breach tiers, maturity settlement, double-claim prevention, and safe `INCONCLUSIVE` handling. Challenge-specific coverage proves that an unusable challenge URL reverts before storage and leaves the breach, evidence count, and both parties' challenge lanes unchanged.
+Direct tests deliberately mock web and model calls. They cover validation, authorization, escrow accounting, principal readiness, repayment, cancellation, cooldowns, challenges, three breach tiers, maturity settlement, double-claim prevention, and safe `INCONCLUSIVE` handling. Challenge-specific coverage proves that an unusable challenge URL reverts before storage and leaves the breach, evidence count, and both parties' challenge lanes unchanged; that an original breach remains open when three individually admissible candidate values do not corroborate each other; and that each party retains a separate lane.
 
 The active v2 deployment also has a real StudioNet challenge-admission result: loan `0`, covenant `0` obtained a three-publisher Bitcoin-supply `BREACH` (`21,000,000.000000` against a `>= 22,000,000` covenant) in transaction `0x10558b4824d5d8b5d23484de69231ae9d612fb0eb2a5981078ff1971ac57a88d`. Submitting `https://challenge-evidence-missing.invalid/report` in transaction `0x9a882cee8fa0754423385d4e1332fb951b7ea5faf3e4ab42c08b3d194f073273` rolled back with the expected admission error. A finalized read verified `BREACH`, `finalized = false`, `challenge_count = 0`, and no stored challenge evidence.
 

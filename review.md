@@ -44,10 +44,10 @@ The exact submitted contract source passed:
 
 - Python compilation.
 - 5 static safety tests.
-- 39 direct GenLayer behavior tests.
+- 41 direct GenLayer behavior tests.
 - 3 GenVM lint checks with no warnings.
 
-The direct tests cover the failure mode explicitly: an unusable challenge candidate reverts, leaves the check in `BREACH`, leaves the evidence count at zero, and does not prevent a later valid submission from the other party.
+The direct tests cover the failure mode explicitly: an unusable challenge candidate reverts, leaves the check in `BREACH`, leaves the evidence count at zero, and does not prevent a later valid submission from the other party. URL-specific fixtures also prove that three individually admissible yet mutually non-corroborating contrary sources preserve the original breach, whereas only a corroborated contrary lane can overturn it while the original source set remains breached.
 
 ### Live StudioNet guard test
 

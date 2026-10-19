@@ -28,7 +28,7 @@ This is the current contract to use. Its deployment input was the exact `contrac
 |---|---|
 | Python compilation | passed |
 | Static safety checks | 5 passed |
-| Direct GenLayer behavior tests | 39 passed |
+| Direct GenLayer behavior tests | 41 passed |
 | GenVM lint | 3 checks passed; no warnings |
 | StudioNet deployment | finalized with `MAJORITY_AGREE`, 5/5 agree |
 
@@ -49,7 +49,7 @@ This stateful StudioNet test was executed against the active v2 address after de
 
 The validator receipt recorded no usable evidence from the `.invalid` host (`independent-source quorum not reached (0/1)`) and rolled the whole write back. The subsequent finalized state read proves that the failed attempt neither erased the original breach nor consumed either party's challenge capacity.
 
-The direct suite includes a challenge-admission test that submits an `INCONCLUSIVE` candidate, asserts that it reverts with no state change, and then admits a valid `COMPLIANT` candidate from the other party. It also checks that adjudication reads the original sources first and cannot convert a prior breach to `INCONCLUSIVE`.
+The direct suite uses URL-specific evidence responses to verify the actual adjudication boundary: original publishers can remain `BREACH` while a distinct three-source contrary lane is required to overturn it; three individually admissible but mutually non-corroborating candidates preserve the open breach; and an `INCONCLUSIVE` candidate reverts before storage. It also verifies that each party retains a separate lane.
 
 ## Historical real-data E2E record (v1, not the active instance)
 

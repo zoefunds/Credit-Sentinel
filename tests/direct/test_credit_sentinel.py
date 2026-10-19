@@ -595,9 +595,35 @@ def test_cooldown_clears_after_window(direct_vm, direct_deploy, direct_alice, di
 # Challenge window — additive evidence flow
 # ---------------------------------------------------------------------------
 
+
+def _mock_split_challenge_evidence(direct_vm, challenge_values):
+    """Give the pinned source set a BREACH value and candidate hosts their
+    own values.  This is deliberately URL-specific so challenge tests prove
+    the original sources are re-read rather than silently replaced."""
+    direct_vm.clear_mocks()
+    direct_vm.mock_web(r".*example\.org.*", {
+        "status": 200,
+        "body": "mocked public attestation page",
+    })
+    for host in ("one", "two", "three"):
+        direct_vm.mock_llm(
+            rf"INDEPENDENT SOURCE URL[\s\S]*{host}\.example\.org",
+            json.dumps({"status": "BREACH", "observed_value": 0.8, "observed_note": "original source remains below the covenant threshold"}),
+        )
+    for host, value in challenge_values.items():
+        direct_vm.mock_llm(
+            rf"INDEPENDENT SOURCE URL[\s\S]*{host}\.example\.org",
+            json.dumps({"status": "COMPLIANT", "observed_value": value, "observed_note": "candidate source supports compliance"}),
+        )
+
+
 def test_challenge_evidence_can_overturn_breach(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract, loan_id, covenant_id = _setup_offchain_active_loan(direct_vm, direct_deploy, direct_alice, direct_bob)
-    mock_offchain_verdict(direct_vm, status="BREACH", value=0.8)
+    _mock_split_challenge_evidence(direct_vm, {
+        "four": 1.2,
+        "five": 1.2,
+        "six": 1.2,
+    })
     direct_vm.sender = direct_alice
     check_id = contract.trigger_covenant_check(loan_id, covenant_id)
     initial_check = contract.get_check(check_id)
@@ -605,10 +631,9 @@ def test_challenge_evidence_can_overturn_breach(direct_vm, direct_deploy, direct
     pinned_source_hash = initial_check["pinned_source_hash"]
     assert pinned_source_hash
 
-    # Borrower submits additional evidence; re-evaluation (still mocked)
-    # now returns COMPLIANT because the mocked LLM output is reconfigured —
-    # in production this models a corrected/updated reading.
-    mock_offchain_verdict(direct_vm, status="COMPLIANT", value=1.1)
+    # The pinned three-source set remains at 0.8/BREACH throughout this
+    # test. Only the caller's three independent candidate sources report a
+    # corroborated 1.2/COMPLIANT value, which is the sole valid override.
     direct_vm.sender = direct_bob
     for host in ("four.example.org", "five.example.org", "six.example.org"):
         contract.submit_challenge_evidence(
@@ -629,6 +654,70 @@ def test_challenge_evidence_can_overturn_breach(direct_vm, direct_deploy, direct
         "https://two.example.org/attestation",
         "https://three.example.org/attestation",
     ]
+
+
+def test_noncorroborating_admitted_lane_preserves_original_breach(
+    direct_vm, direct_deploy, direct_alice, direct_bob,
+):
+    contract, loan_id, covenant_id = _setup_offchain_active_loan(
+        direct_vm, direct_deploy, direct_alice, direct_bob,
+    )
+    # Every individual candidate is COMPLIANT, so all three pass admission,
+    # but their values are mutually outside the 2% corroboration band. This
+    # recreates the historical dangerous lane outcome without allowing it to
+    # erase or finalize the original BREACH.
+    _mock_split_challenge_evidence(direct_vm, {
+        "four": 1.10,
+        "five": 1.50,
+        "six": 1.90,
+    })
+    direct_vm.sender = direct_alice
+    check_id = contract.trigger_covenant_check(loan_id, covenant_id)
+    direct_vm.sender = direct_bob
+    for host in ("four.example.org", "five.example.org", "six.example.org"):
+        contract.submit_challenge_evidence(
+            loan_id, check_id, f"https://{host}/conflicting-reading", "Candidate reading supports compliance.",
+        )
+
+    check = contract.get_check(check_id)
+    assert check["status"] == "BREACH"
+    assert check["finalized"] is False
+    assert check["challenge_pending"] is False
+    assert check["challenge_count"] == 3
+
+
+def test_each_party_retains_a_separate_challenge_lane(
+    direct_vm, direct_deploy, direct_alice, direct_bob,
+):
+    contract, loan_id, covenant_id = _setup_offchain_active_loan(
+        direct_vm, direct_deploy, direct_alice, direct_bob,
+    )
+    _mock_split_challenge_evidence(direct_vm, {
+        "four": 1.2, "five": 1.2, "six": 1.2,
+        "seven": 1.2, "eight": 1.2, "nine": 1.2,
+    })
+    direct_vm.sender = direct_alice
+    check_id = contract.trigger_covenant_check(loan_id, covenant_id)
+
+    # Alice may admit two sources without triggering adjudication; Bob can
+    # still admit two of his own, proving capacity belongs to each party and
+    # is not a shared three-entry allowance.
+    for sender, hosts in (
+        (direct_alice, ("four", "five")),
+        (direct_bob, ("seven", "eight")),
+    ):
+        direct_vm.sender = sender
+        for host in hosts:
+            contract.submit_challenge_evidence(
+                loan_id, check_id, f"https://{host}.example.org/evidence", "Independent compliant observation.",
+            )
+
+    check = contract.get_check(check_id)
+    submitters = [item.lower() for item in check["challenge_evidence_submitters"]]
+    assert check["challenge_count"] == 4
+    assert submitters.count(to_hex(direct_alice).lower()) == 2
+    assert submitters.count(to_hex(direct_bob).lower()) == 2
+    assert check["finalized"] is False
 
 
 def test_unusable_challenge_submission_does_not_consume_either_party_lane(
